@@ -1,0 +1,95 @@
+---
+title: "Homework 7 (Week 8)"
+author: "Zeyu Wang/Charlie"
+date: "March 4, 2019"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Report
+
+### Question 1 
+
+##### Below are properties of RNA-seq read counts data:
+* Raw counts will be influenced by sequencing depth, and when we compare a gene between several samples, we should normalize sequencing depth using command "estimateSizeFactor" under the DESeq2.
+* The second type of effect comes from gene length (and GC bias), which should be corrected when comparing different genes, and we can use TPM to adjust it.
+* RNA composition, which is individual gene abundances, also influence on read counts data when comparing different genes. Normalizing the data by rlog is a helpful adjustment in this case.
+
+
+### Question 2
+
+#### 2.1
+#### Commands for checking two functions:
+```{ }
+?rlog
+?DESeqDataSetFromMatrix
+```
+
+#### Results:
+* rlog(object, blind = TRUE, intercept, betaPriorVar, fitType = "parametric")
+* DESeqDataSetFromMatrix(countData, colData, design, tidy = FALSE, ignoreRank = FALSE, ...)
+
+#### Commands for finding differences between two functions:
+```{ }
+saveRDS(DESeq.rlog, "rlog.rds")
+saveRDS(DESeq.ds, "DESeq.rds")
+```
+```{r}
+suppressPackageStartupMessages(library(DESeq2))
+
+rlogDS <- readRDS("C:/Users/WZY77/Study/WCM/Courses/ANGSD/ANGSD/ANGSD/rlog.rds")
+DESeqDS <- readRDS("C:/Users/WZY77/Study/WCM/Courses/ANGSD/ANGSD/ANGSD/DESeq.rds")
+
+showClass(class(DESeqDS))
+showClass(class(rlogDS))
+
+```
+
+##### Similarities:
+* They have three same slots, which make sense since when we do an analysis, rlog() is often a downstream function of DESeqDataSetFromMatrix(), acctually the output of the latter is just the input of rlog().
+* They both are functions under DESeq package, so their outputs are same, which should be DESeq objects. 
+
+##### Differences:
+* From above, rlog() is used to normalize the data from DESeqDataSetFromMatrix(), that means data in rlog() output is log2 scale, while data in DESeqDataSetFromMatrix() output is just original data.
+* Also, output of DESeqDataSetFromMatrix() is basically raw data, so we should and can do normalization, in various way, in order to analyze it, while rlog() gives normalized data which can be compared but may not able to be further normalized by other functions.
+
+
+### 2.2
+#### Extracting expression values
+```{r}
+head(assay(DESeqDS))
+head(assay(rlogDS))
+```
+
+##### Assay is the slot that store counts, thus we can just use it as the function to show expression values.
+
+### 2.3
+#### Add an additional matrix
+```{r}
+rlogDS@metadata$my_personal_normalization <- assay(rlogDS)
+rlogDS
+```
+
+##### It's the same to add to another object, and now "my_personal_normalization" shows up under "metadata" of "rlogDS".
+
+
+###Question 3
+
+```{r, fig.align = 'center' }
+rlog.norm.counts <- readRDS("C:/Users/WZY77/Study/WCM/Courses/ANGSD/ANGSD/ANGSD/rlog.norm.rds")
+ps_corr <- cor(rlog.norm.counts, method = "pearson")
+distance.m_rlog <- as.dist(1-ps_corr)
+plot(hclust(distance.m_rlog),labels=colnames(rlog.norm.counts),main="rlog transformed read counts")
+plotPCA(rlogDS, intgroup=c("condition"))
+```
+
+##### We can find from two graphs that WT and SNF2 groups are definitely distinct from each other. But the SNF2 clusters are closer than the WT clusters. In WT clusters, 2 and 5 are close but seperate from the rest, while in the rest 1 is separate from 3 and 4.
+##### For pcaExplorer, there are top/bottom loadings that can be shown, and I think top loadings may represent the genes that are highly expressed in a PC.
