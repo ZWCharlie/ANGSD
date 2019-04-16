@@ -1,0 +1,306 @@
+---
+title: "Final project"
+author: "Zeyu Wang/Charlie"
+date: "April 16, 2019"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Report
+
+### Summary of dataset and paper:
+##### I found RNA-seq data of T2D mouse with wildtype mouse from NCBI, then download their fastq files from ENA and running STAR alignment, while I use GTF annotations and fasta files from GENCODE as reference genome.
+
+* My data is from a GEO dataset on NCBI: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE43314
+
+* The publication it links to is: https://www.ncbi.nlm.nih.gov/pubmed/23469233
+
+* The generators of these data are: Zhang F, Xu X, Zhai Q
+
+* RNA was extracted from liver samples with Trizol reagent.
+
+* About 3 h after the beginning of light cycle, 9-week-old mice were sacrificed, and the livers were immediately removed and snap-frozen in liquid nitrogen. Total RNA was extracted from liver samples with Trizol reagent (Invitrogen), according to the manufacturer's instruction.
+    * The Solexa sequencing procedure was conducted by using the manufacturer’s protocol. Briefly, magnetic oligo(dT) beads were used to isolate poly(A) mRNA from the total RNA samples. cDNA was synthesized from the isolated mRNA using random hexamer primers. Then the cDNA was digested with Dpn II, and the standard Solexa protocol for digital gene expression-tag profiling was followed thereafter to create cDNA libraries.
+
+* The cell type is wild type C57BL/6, extracted from liver of adult, 9 weeks male mice.
+
+* There are two samples generated from wildtype and T2D seperately, both came from a same model animal center.
+
+* Sequencing platform here was GPL9185 Illumina Genome Analyzer (Mus musculus).
+
+
+### UNIX processing: 
+#### Make index, running STAR, QC, featureCounts etc.:
+```{Codes}
+## Except samtools, all others were done by running script
+## All QC results shows below this chunk
+
+# Make index
+spack load star@2.6.1a
+STAR --runMode genomeGenerate --runThreadN 8  --genomeDir /athena/angsd/scratch/zew/alignment  --genomeFastaFiles /home/zew4001/ANGSD/mouse.index/GRCm38.primary_assembly.genome.fa  --sjdbGTFfile /home/zew4001/ANGSD/mouse.index/gencode.vM20.annotation.gtf  --sjdbOverhang 34
+
+#Raw data QC
+spack load fastqc
+fastqc /home/zew4001/ANGSD/project/raw_data/SRR645883.fastq.gz --extract -o /home/zew4001/ANGSD/project/raw_dataqc/
+fastqc /home/zew4001/ANGSD/project/raw_data/SRR645884.fastq.gz --extract -o /home/zew4001/ANGSD/project/raw_dataqc/
+
+#Raw data trimming
+spack load -r trimgalore
+trim_galore --illumina /home/zew4001/ANGSD/project/raw_data/SRR645883.fastq.gz -o /home/zew4001/ANGSD/project/raw_data/
+trim_galore --illumina /home/zew4001/ANGSD/project/raw_data/SRR645884.fastq.gz -o /home/zew4001/ANGSD/project/raw_data/
+
+fastqc /home/zew4001/ANGSD/project/raw_data/SRR645883_trimmed.fq.gz --extract -o /home/zew4001/ANGSD/project/raw_dataqc/
+fastqc /home/zew4001/ANGSD/project/raw_data/SRR645884_trimmed.fq.gz --extract -o /home/zew4001/ANGSD/project/raw_dataqc/
+
+# Running STAR
+STAR --runMode alignReads  --runThreadN 8 --genomeDir /athena/angsd/scratch/zew/alignment --readFilesIn /home/zew4001/ANGSD/project/raw_data/SRR645883.fastq.gz  --readFilesCommand zcat  --outFileNamePrefix /home/zew4001/ANGSD/project/Mouse_align1/Mouse_align1. --outSAMtype BAM SortedByCoordinate
+STAR --runMode alignReads  --runThreadN 8 --genomeDir /athena/angsd/scratch/zew/alignment --readFilesIn /home/zew4001/ANGSD/project/raw_data/SRR645884.fastq.gz  --readFilesCommand zcat  --outFileNamePrefix /home/zew4001/ANGSD/project/Mouse_align2/Mouse_align2. --outSAMtype BAM SortedByCoordinate
+
+# STAR QC
+spack load samtools@1.9%gcc@6.3.0
+samtools stats Mouse_align1/Mouse_align1.Aligned.sortedByCoord.out.bam > Mouse_align1/Mouse_align1.stats
+samtools stats Mouse_align2/Mouse_align2.Aligned.sortedByCoord.out.bam > Mouse_align2/Mouse_align2.stats
+
+# FeatureCounts:
+spack load subread@1.6.2
+featureCounts -M -O -T 8 -a /athena/angsd/scratch/zew/fasta/gencode.vM20.primary_assembly.annotation.gtf -o /home/zew4001/ANGSD/project/featureCounts/Mouse.featureCount.multi.txt /home/zew4001/ANGSD/project/Mouse_align*/*.bam
+
+# Multiqc
+spack load -r py-multiqc
+multiqc -n multi.html .
+
+# Move to R
+scp zew4001@pascal.med.cornell.edu:ANGSD/project/raw_dataqc/*.html .
+scp zew4001@pascal.med.cornell.edu:ANGSD/project/*.html .
+scp zew4001@pascal.med.cornell.edu:ANGSD/project/featureCounts/Mouse.featureCount.* .
+
+```
+
+Status    | Mouse_align1  |   Mouse_align2
+----------|---------------|----------------------
+Assigned  |      15798    |  10478
+Unassigned_Unmapped  |   0  |     0
+Unassigned_MappingQuality   |    0     |  0
+Unassigned_Chimera      |0    |   0
+Unassigned_FragmentLength     |  0    |   0
+Unassigned_Duplicate    |0      | 0
+Unassigned_MultiMapping |0       |0
+Unassigned_Secondary   | 0|       0
+Unassigned_Nonjunction|  0 |      0
+Unassigned_NoFeatures |  313749 | 251458
+Unassigned_Overlapping_Length |  0  |     0
+Unassigned_Ambiguity  |  0      | 0
+
+
+#### Discuss 1
+##### (In all cases of this project, "mouse_align1" refers to normal, while "mouse_align2" refers to diabetic case.)
+##### I found that it's a huge mistake to use this dataset after I have already done STAR alignment, since the results of fastqc and samtools really show that the sequencing quality is really strange, which even affected STAR and every result of further analysis.
+##### We can see in table above that for raw data QC result, the "per base sequence content" is really a mess, which can be clearer when looking at the multiqc result. What I really cannot understand is the difference between my QC result and what shown in the paper I refer to, since they claimed they had got "over 10 and 13 million reads of high quality clean tags". Maybe the methods of alignment also matters a lot, which means I might choose a way which is not so appropriate.
+
+
+### R codes part:
+#### Plot for gene featureCount
+```{r, fig.align='center'}
+
+library(ggplot2)
+library(tidyr)
+suppressPackageStartupMessages(library(dplyr))
+
+gene <- read.delim("C:\\Users\\WZY77\\Study\\WCM\\Courses\\ANGSD\\ANGSD\\Mouse.featureCount.multi.txt.summary", row.names = 1) %>%
+  t %>%
+  as.data.frame %>%
+  mutate(sample=gsub("X.home.zew4001.ANGSD.project.|.Mouse_align1.Aligned.sortedByCoord.out.bam|.Mouse_align2.Aligned.sortedByCoord.out.bam", "", rownames(.)))
+
+gene <- gather(gene,Assign, Reads, -sample)
+gene <- gene[c(which(gene$Reads!=0)),]
+
+ggplot(data=gene, aes(x=sample, y=Reads, fill=Assign)) +
+  geom_bar(stat="identity", color="black", position=position_dodge())+
+  theme_minimal()
+
+```
+
+#### Gene_id to gene_name
+```{r}
+library(biomaRt)
+library(stats4)
+suppressPackageStartupMessages(library(BiocGenerics))
+library(parallel)
+library(Biobase)
+suppressPackageStartupMessages(library(S4Vectors))
+suppressPackageStartupMessages(library(IRanges))
+suppressPackageStartupMessages(library(AnnotationDbi))
+library(org.Mm.eg.db)
+
+featureCounts  <- read.table("C:\\Users\\WZY77\\Study\\WCM\\Courses\\ANGSD\\ANGSD\\Mouse.featureCount.multi.txt", stringsAsFactors = FALSE, row.names = NULL) %>%
+  as.data.frame
+colnames(featureCounts)<-gsub("/home/zew4001/ANGSD/project/|/Mouse_align1.Aligned.sortedByCoord.out.bam|/Mouse_align2.Aligned.sortedByCoord.out.bam", "",featureCounts[1,])
+featureCounts <- featureCounts[2:nrow(featureCounts),]
+featureCounts$Geneid <- gsub("\\..*","",featureCounts$Geneid)
+
+anno.m1 <- AnnotationDbi::select(org.Mm.eg.db,
+               keys = featureCounts$Geneid, 
+               keytype="ENSEMBL", 
+               columns=c("ENSEMBL","SYMBOL","GENENAME"))
+
+n_occur <- data.frame(table(anno.m1$ENSEMBL))
+
+anno.m1$SYMBOL[which(is.na(anno.m1$SYMBOL))] <- anno.m1$ENSEMBL[which(is.na(anno.m1$SYMBOL))]
+n <- numeric(0)
+k <- numeric(0)
+suppressWarnings(for (j in 1:length(n_occur$Var1[n_occur$Freq > 1])) {
+  n[j] <- which(anno.m1$ENSEMBL == n_occur$Var1[n_occur$Freq > 1][j])
+  m <- which(anno.m1$ENSEMBL == n_occur$Var1[n_occur$Freq > 1][j]) 
+  k <- c(k,m)
+  })
+anno.m1 <- anno.m1[-c(setdiff(k,n)),]
+featureCounts$Geneid <- anno.m1$SYMBOL[which(anno.m1$ENSEMBL==featureCounts$Geneid)]
+n_ids <- data.frame(table(featureCounts$Geneid))
+
+n <- numeric(0)
+k <- numeric(0)
+suppressWarnings(for (i in 1:length(n_ids$Var1[n_ids$Freq > 1])) {
+  n[j] <- which(anno.m1$ENSEMBL == n_occur$Var1[n_occur$Freq > 1][j])
+  m <- which(featureCounts$Geneid==n_ids$Var1[n_ids$Freq > 1][i])
+  featureCounts$Mouse_align1[m] <- sum(as.numeric(featureCounts$Mouse_align1[m]))
+  featureCounts$Mouse_align2[m]<-sum(as.numeric(featureCounts$Mouse_align2[m]))
+  k <- c(k,m)
+  })
+featureCounts <- featureCounts[-c(setdiff(k,n)),]
+
+row.names(featureCounts) <- featureCounts$Geneid
+featureCounts <- featureCounts[,-c(1:6)]
+names(featureCounts) <- gsub("_.*1",".Normal",names(featureCounts))
+names(featureCounts) <- gsub("_.*2",".Diabetic",names(featureCounts))
+```
+
+#### DESeq: rlog & normalized
+```{r,fig.align='center'}
+suppressPackageStartupMessages(library(DelayedArray))
+library(matrixStats)
+library(BiocParallel)
+library(GenomeInfoDb)
+suppressPackageStartupMessages(library(SummarizedExperiment))
+library(GenomicRanges)
+library(DESeq2)
+
+# Sum of read counts
+featureCounts[,1] <- as.numeric(featureCounts[,1])
+featureCounts[,2] <- as.numeric(featureCounts[,2])
+info<- DataFrame(condition=names(featureCounts),row.names = names(featureCounts))
+DESeq.ds <- DESeqDataSetFromMatrix(countData = featureCounts,
+                                   colData = info, 
+                                   design = ~ condition
+                                   )
+colSums(counts(DESeq.ds)) %>% barplot()
+
+# Size factors
+keep_genes <- rowSums(counts(DESeq.ds)) > 0
+##dim(DESeq.ds[keep_genes,])
+DESeq.ds <- DESeq.ds[keep_genes,]
+de2 <- estimateSizeFactors(DESeq.ds)
+sizeFactors(de2)
+
+# Plots
+par(mfrow=c(1,2))
+de.normalized <- counts(de2,normalized=TRUE)
+boxplot(de.normalized, main="Normalized")
+boxplot(counts(de2),main ="read counts")
+
+par(mfrow=c(1,1))
+log.norm.counts <- log2(counts(de2, normalized=TRUE) + 1)
+msd_plot <- vsn::meanSdPlot(log.norm.counts, ranks=FALSE, plot = FALSE)
+msd_plot$gg + 
+ggtitle("Sequencing depth normalized log2(read counts)") +
+ylab("standard deviation")
+
+DESeq.rlog <- rlog(de2, blind = TRUE)
+DESeq.vst <- varianceStabilizingTransformation(de2,blind = TRUE)
+
+par(mfrow=c(1,2))
+plot(log.norm.counts[,1:2], cex=.1,
+     main = "size factor and log2-transformed")
+plot(assay(DESeq.rlog)[,1],
+     assay(DESeq.rlog)[,2],
+     cex=.1, main = "rlog transformed",
+     xlab = colnames(assay(DESeq.rlog[,1])),
+     ylab = colnames(assay(DESeq.rlog[,2])) )
+
+par(mfrow=c(1,2))
+plot(log.norm.counts[,1:2], cex=.1,
+     main = "size factor and log2-transformed")
+plot(assay(DESeq.vst)[,1],
+     assay(DESeq.vst)[,2],
+     cex=.1, main = "vst transformed",
+     xlab = colnames(assay(DESeq.vst[,1])),
+     ylab = colnames(assay(DESeq.vst[,2])) )
+rlog.norm <- assay(DESeq.rlog)
+vst.norm <- assay(DESeq.vst)
+msd_plot <- vsn::meanSdPlot( rlog.norm, ranks=FALSE, plot = FALSE)
+msd_plot$gg + ggtitle("rlog transformation")
+msd_plot <- vsn::meanSdPlot( vst.norm, ranks=FALSE, plot = FALSE)
+msd_plot$gg + ggtitle("vst transformation")
+
+```
+
+#### Discuss 2
+##### From plots in this section, everyone will think I might either get a bad dataset, or did something really wrong during data processing. Actually it's really obvious that STAR gave less than 10% aligned reads compare to total, while DESeq really cannot show any useful stuffs.
+##### One thing I noticed is when running rlog() function using DESeq package, it suggested me to use varianceStabilizingTransformation() rather than rlog() since rlog() assume the data is close to a negative binomial distribution, while sometimes it may be a wrong assumption. But the result between vst() and rlog() are actually different, though either of them can make any sense to explain what happens between the two samples.
+##### One more thing is that the size factor of both samples are just 1, which is kind of confusing to me. Since in my mind, size factor was calculated by using geometric mean and some other steps, which should not provide values as 1, then I had to guess if it is related to sample numbers. If that's true, I think I may keep away from any "one-sample" data in future, as what we learnt can really not be used on this kind of dataset.
+
+
+#### Brief comparing between Normal and Diabetic samples
+```{r,fig.align='center'}
+log.norm<- as.data.frame(log.norm.counts)
+log.norm$Diff <- log.norm$Mouse.Diabetic - log.norm$Mouse.Normal
+high<- log.norm[log.norm$Diff > 0,]
+high<- high[-c(1,2)]
+high.sort <- high[order(high[,"Diff"],decreasing = TRUE), , drop = FALSE]
+write.table(row.names(high.sort),file = "./highgenes.txt",sep = "",eol = "\n",quote = FALSE,row.names = FALSE,col.names = FALSE)
+
+low<- log.norm[log.norm$Diff < 0,]
+low<- low[-c(1,2)]
+low.sort <- low[order(low[,"Diff"]), , drop = FALSE]
+write.table(row.names(low.sort),file = "./lowgenes.txt",sep = "",eol = "\n",quote = FALSE,row.names = FALSE,col.names = FALSE)
+write.table(row.names(log.norm),file = "./allgenes.txt",sep = "",eol = "\n",quote = FALSE,row.names = FALSE,col.names = FALSE)
+
+compare <- as.data.frame(c(high.sort[1:15,],low.sort[1:15,]))
+row.names(compare) <- c(row.names(high.sort)[1:15],row.names(low.sort)[1:15])
+colnames(compare) <- "Gene"
+ggplot(compare,mapping = aes(row.names(compare),compare$Gene)) + geom_bar(stat = "identity") + scale_x_discrete(limits = row.names(compare)) + labs(title = "Compare between most significant genes", x = "Gene names/symbols", y = "Log expression") + theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+```
+
+#### Discuss 3
+##### Above shows the most significant result between upregulated gene expressions and downregulated gene expressions in log2 value, which we can see the number genes with very significant values are actually really small, which is still not equal to the reference paper.
+##### I then tried to used the same online tool, KEGG, to find main regulated pathways of both up and downregulated genes, the result shows:
+##### Upregulated genes have pathways (other than house keeping pathways):
+* Retinol metabolism - Mus musculus (mouse) (19)
+* Drug metabolism - other enzymes - Mus musculus (mouse) (18)
+* Non-alcoholic fatty liver disease (NAFLD) - Mus musculus (mouse) (15)
+* Alzheimer disease - Mus musculus (mouse) (14)
+* Huntington disease - Mus musculus (mouse) (14)
+
+##### Downregulated genes have pathways:
+* PI3K-Akt signaling pathway - Mus musculus (mouse) (20)
+* Cellular senescence - Mus musculus (mouse) (18)
+* Hepatocellular carcinoma - Mus musculus (mouse) (17)
+* Gastric cancer - Mus musculus (mouse) (16)
+* Transcriptional misregulation in cancer - Mus musculus (mouse) (15)
+
+##### Surprisingly, with in the five highest pathways, only one shows relationship with metabolism, which is also a disease leading pathway: non-alcoholic fatty liver. Compare to upregulated genes which have kind of wide range relation to diseases, downregulated ones seems more related to cancer specifically. This case is exactly what they have said in the paper.
+##### But in that paper, there is also a saying that genes of fatty acid metabolism have a obvious upregulation in diabetic samples, while I did not find any highly regulated pathway (even in highest 20 pathways), maybe also because of the dataset itself.
+
+### Conclusion
+##### I cannot say I really get any answer to the question I have asked: "Is there any different gene expression of insulin signal pathway between diabetic patient and normal case?", as there is no evidence during my analysis to prove whether case it belongs to.
+##### I do not think I have finished what I previously thought, because I did not check the dataset when I got it, which leads to a poor analysis. Also I really need to improve the way I think about all the progresses during a RNA-seq data processing, since I always forget what to do next after finish one step without continuing checking course slides.
+
+##### I do think I have learnt a lot of skills during ANGSD course, not only the way to process and analyze NGS data, but also to have a critical thinking on any phenomenon, result from others, or even topics of famous literature. Previously I was a student from bioengineering field with no programming experience, while now I can at least do something to NGS data which generated by one of the most widely used technology currently. I really think this course helps me a lot in both computational field and biology field.
